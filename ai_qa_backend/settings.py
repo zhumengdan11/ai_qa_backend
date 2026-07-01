@@ -149,7 +149,7 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 
 QWEN3_API_KEY = os.getenv('QWEN3_API_KEY', '')
 QWEN3_BASE_URL = os.getenv('QWEN3_BASE_URL', 'https://api.qwen.ai/v1')
-QWEN3_MODEL = os.getenv('QWEN3_MODEL', 'qwen3-7b')
+QWEN3_MODEL = os.getenv('QWEN3_MODEL', 'qwen3')
 
 ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
