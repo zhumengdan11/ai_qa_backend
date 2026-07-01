@@ -1,0 +1,338 @@
+{% extends 'qa_app/base.html' %}
+{% load static %}
+
+{% block title %}管理后台 - AI问答系统{% endblock %}
+
+{% block content %}
+<!-- 顶部导航 -->
+<nav class="navbar admin-navbar">
+    <div class="nav-brand">
+        <i class="fas fa-robot nav-logo"></i>
+        <span>AI 问答管理后台</span>
+    </div>
+    <div class="nav-links">
+        <span class="admin-welcome">
+            <i class="fas fa-user-circle"></i> {{ admin_username }}
+        </span>
+        <a href="{% url 'chat' %}" class="nav-link">
+            <i class="fas fa-comment"></i> 问答页
+        </a>
+        <button id="logoutBtn" class="nav-link logout-btn">
+            <i class="fas fa-sign-out-alt"></i> 退出
+        </button>
+    </div>
+</nav>
+
+<div class="dashboard-container">
+    <!-- 统计卡片 -->
+    <div class="stats-grid">
+        <div class="stat-card stat-total">
+            <div class="stat-icon">
+                <i class="fas fa-database"></i>
+            </div>
+            <div class="stat-info">
+                <span class="stat-number">{{ total_count }}</span>
+                <span class="stat-label">总问答记录</span>
+            </div>
+        </div>
+        <div class="stat-card stat-today">
+            <div class="stat-icon">
+                <i class="fas fa-calendar-day"></i>
+            </div>
+            <div class="stat-info">
+                <span class="stat-number">{{ today_count }}</span>
+                <span class="stat-label">今日提问</span>
+            </div>
+        </div>
+        <div class="stat-card stat-export">
+            <div class="stat-icon">
+                <i class="fas fa-file-export"></i>
+            </div>
+            <div class="stat-info">
+                <span class="stat-action" onclick="exportRecords()">导出数据</span>
+                <span class="stat-label">导出为 TXT</span>
+            </div>
+        </div>
+        <div class="stat-card stat-clear">
+            <div class="stat-icon">
+                <i class="fas fa-trash-alt"></i>
+            </div>
+            <div class="stat-info">
+                <span class="stat-action text-danger" onclick="batchClear()">清空全部</span>
+                <span class="stat-label">清空记录</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 搜索栏 -->
+    <div class="search-bar">
+        <div class="search-wrapper">
+            <i class="fas fa-search search-icon"></i>
+            <input type="text" id="searchInput" class="search-input" placeholder="搜索问题或回答..." oninput="searchRecords()">
+        </div>
+        <div class="search-actions">
+            <select id="pageSizeSelect" class="page-size-select" onchange="searchRecords()">
+                <option value="10">10条/页</option>
+                <option value="20" selected>20条/页</option>
+                <option value="50">50条/页</option>
+            </select>
+            <button class="refresh-btn" onclick="searchRecords()">
+                <i class="fas fa-sync-alt"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- 数据表格 -->
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th class="col-id">ID</th>
+                    <th class="col-question">问题</th>
+                    <th class="col-answer">AI回答</th>
+                    <th class="col-time">提问时间</th>
+                    <th class="col-action">操作</th>
+                </tr>
+            </thead>
+            <tbody id="recordsBody">
+                <!-- 动态渲染 -->
+            </tbody>
+        </table>
+    </div>
+
+    <!-- 分页 -->
+    <div class="pagination-bar" id="paginationBar" style="display:none;">
+        <div class="pagination-info" id="paginationInfo"></div>
+        <div class="pagination-buttons" id="paginationButtons"></div>
+    </div>
+
+    <!-- 空状态 -->
+    <div class="empty-state" id="emptyState" style="display:none;">
+        <i class="fas fa-inbox"></i>
+        <p>暂无问答记录</p>
+    </div>
+</div>
+
+<!-- 确认对话框 -->
+<div class="modal-overlay" id="confirmModal" style="display:none;">
+    <div class="modal-box">
+        <div class="modal-header">
+            <i class="fas fa-exclamation-triangle text-danger"></i>
+            <h3 id="modalTitle">确认操作</h3>
+        </div>
+        <p id="modalMessage" class="modal-message"></p>
+        <div class="modal-actions">
+            <button class="btn-cancel" onclick="closeModal()">取消</button>
+            <button id="confirmBtn" class="btn-danger">确认</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let currentPage = 1;
+let currentKeyword = '';
+let currentPageSize = 20;
+function getCSRFToken() {
+    const name = 'csrftoken';
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.startsWith(name + '=')) {
+                return decodeURIComponent(cookie.substring(name.length + 1));
+            }
+        }
+    }
+    return '';
+}
+const csrfToken = getCSRFToken();
+
+// 加载记录
+async function loadRecords(page = 1) {
+    const keyword = currentKeyword;
+    const pageSize = currentPageSize;
+
+    try {
+        const response = await fetch(`/api/chat/list?page=${page}&page_size=${pageSize}&keyword=${encodeURIComponent(keyword)}`);
+        const result = await response.json();
+
+        if (result.success) {
+            renderTable(result.data);
+            renderPagination(result.pagination);
+        }
+    } catch (error) {
+        console.error('加载失败:', error);
+    }
+}
+
+// 渲染表格
+function renderTable(records) {
+    const tbody = document.getElementById('recordsBody');
+    const emptyState = document.getElementById('emptyState');
+
+    if (records.length === 0) {
+        tbody.innerHTML = '';
+        emptyState.style.display = 'block';
+        document.querySelector('.table-container').style.display = 'none';
+        document.getElementById('paginationBar').style.display = 'none';
+        return;
+    }
+
+    emptyState.style.display = 'none';
+    document.querySelector('.table-container').style.display = 'block';
+    document.getElementById('paginationBar').style.display = 'flex';
+
+    tbody.innerHTML = records.map(r => `
+        <tr>
+            <td class="col-id">#${r.id}</td>
+            <td class="col-question">
+                <div class="cell-text" title="${escapeHtml(r.question)}">${escapeHtml(r.question)}</div>
+            </td>
+            <td class="col-answer">
+                <div class="cell-text answer-text" title="${escapeHtml(r.answer)}">${escapeHtml(r.answer)}</div>
+            </td>
+            <td class="col-time">${r.created_at}</td>
+            <td class="col-action">
+                <button class="btn-delete" onclick="deleteRecord(${r.id})" title="删除">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+// 渲染分页
+function renderPagination(pagination) {
+    const bar = document.getElementById('paginationBar');
+    const info = document.getElementById('paginationInfo');
+    const buttons = document.getElementById('paginationButtons');
+
+    bar.style.display = 'flex';
+    info.textContent = `共 ${pagination.total} 条，第 ${pagination.page}/${pagination.total_pages} 页`;
+
+    let html = '';
+    html += `<button class="page-btn" onclick="loadRecords(1)" ${pagination.page <= 1 ? 'disabled' : ''}><i class="fas fa-angle-double-left"></i></button>`;
+    html += `<button class="page-btn" onclick="loadRecords(${pagination.page - 1})" ${pagination.page <= 1 ? 'disabled' : ''}><i class="fas fa-angle-left"></i></button>`;
+
+    for (let i = Math.max(1, pagination.page - 2); i <= Math.min(pagination.total_pages, pagination.page + 2); i++) {
+        html += `<button class="page-btn ${i === pagination.page ? 'active' : ''}" onclick="loadRecords(${i})">${i}</button>`;
+    }
+
+    html += `<button class="page-btn" onclick="loadRecords(${pagination.page + 1})" ${pagination.page >= pagination.total_pages ? 'disabled' : ''}><i class="fas fa-angle-right"></i></button>`;
+    html += `<button class="page-btn" onclick="loadRecords(${pagination.total_pages})" ${pagination.page >= pagination.total_pages ? 'disabled' : ''}><i class="fas fa-angle-double-right"></i></button>`;
+
+    buttons.innerHTML = html;
+    currentPage = pagination.page;
+}
+
+// 搜索
+function searchRecords() {
+    currentKeyword = document.getElementById('searchInput').value.trim();
+    currentPageSize = parseInt(document.getElementById('pageSizeSelect').value);
+    loadRecords(1);
+}
+
+// 删除记录
+async function deleteRecord(id) {
+    showConfirm('删除确认', '确定要删除这条问答记录吗？此操作不可恢复。', async () => {
+        try {
+            const response = await fetch('/api/chat/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify({ id })
+            });
+            const result = await response.json();
+            if (result.success) {
+                loadRecords(currentPage);
+                showToast('删除成功', 'success');
+            } else {
+                showToast(result.message || '删除失败', 'error');
+            }
+        } catch (error) {
+            showToast('网络错误', 'error');
+        }
+    });
+}
+
+// 批量清空
+function batchClear() {
+    showConfirm('清空确认', '确定要清空所有问答记录吗？此操作不可恢复！', async () => {
+        try {
+            const response = await fetch('/api/chat/batch-clear', {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrfToken }
+            });
+            const result = await response.json();
+            if (result.success) {
+                showToast(result.message, 'success');
+                loadRecords(1);
+                document.querySelector('.stat-number').textContent = '0';
+            } else {
+                showToast(result.message || '清空失败', 'error');
+            }
+        } catch (error) {
+            showToast('网络错误', 'error');
+        }
+    });
+}
+
+// 导出记录
+function exportRecords() {
+    const keyword = currentKeyword;
+    const url = keyword ? `/api/chat/export?keyword=${encodeURIComponent(keyword)}` : '/api/chat/export';
+    window.open(url, '_blank');
+    showToast('导出成功', 'success');
+}
+
+// 退出登录
+document.getElementById('logoutBtn')?.addEventListener('click', async () => {
+    try {
+        await fetch('/api/admin/logout', { headers: { 'X-CSRFToken': csrfToken } });
+        window.location.href = '/admin-panel/login/';
+    } catch (error) {
+        window.location.href = '/admin-panel/login/';
+    }
+});
+
+// 工具函数
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text || '';
+    return div.innerHTML;
+}
+
+function showConfirm(title, message, onConfirm) {
+    document.getElementById('modalTitle').textContent = title;
+    document.getElementById('modalMessage').textContent = message;
+    document.getElementById('confirmModal').style.display = 'flex';
+    document.getElementById('confirmBtn').onclick = () => {
+        closeModal();
+        onConfirm();
+    };
+}
+
+function closeModal() {
+    document.getElementById('confirmModal').style.display = 'none';
+}
+
+function showToast(msg, type) {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.innerHTML = `<i class="fas ${type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'}"></i> ${msg}`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.classList.add('show'), 10);
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 2500);
+}
+
+// 初始化
+loadRecords(1);
+</script>
+{% endblock %}

@@ -1,0 +1,245 @@
+{% extends 'qa_app/base.html' %}
+{% load static %}
+
+{% block title %}AI 智能问答 - 校内AI助手{% endblock %}
+
+{% block content %}
+<!-- 导航栏 -->
+<nav class="navbar">
+    <div class="nav-brand">
+        <i class="fas fa-robot nav-logo"></i>
+        <span>校内 AI 问答助手</span>
+    </div>
+    <div class="nav-links">
+        <a href="{% url 'admin_login' %}" class="nav-link">
+            <i class="fas fa-user-shield"></i> 管理后台
+        </a>
+    </div>
+</nav>
+
+<!-- 主容器 -->
+<div class="chat-container">
+    <div class="chat-header">
+        <div class="header-content">
+            <h1><i class="fas fa-comment-dots"></i> Qwen3 AI 智能问答</h1>
+            <p class="header-subtitle">对接校内大模型，智能解答你的问题</p>
+        </div>
+    </div>
+
+    <!-- 聊天消息区 -->
+    <div class="chat-messages" id="chatMessages">
+        <div class="message welcome-message">
+            <div class="message-avatar avatar-ai">
+                <i class="fas fa-robot"></i>
+            </div>
+            <div class="message-content">
+                <div class="message-bubble ai-bubble">
+                    <p>👋 你好！我是校内 AI 问答助手，基于 Qwen3 大模型。</p>
+                    <p>你可以向我提问任何学习、生活或校园相关的问题，我会尽力为你解答！</p>
+                </div>
+                <span class="message-time">刚刚</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 输入区域 -->
+    <div class="chat-input-area">
+        <div class="input-wrapper">
+            <textarea id="questionInput" class="chat-textarea" placeholder="请输入你的问题..." rows="1" maxlength="2000"></textarea>
+            <button id="sendBtn" class="send-btn" disabled>
+                <i class="fas fa-paper-plane"></i>
+            </button>
+        </div>
+        <div class="input-footer">
+            <span id="charCount" class="char-count">0 / 2000</span>
+            <span id="statusText" class="status-text">就绪</span>
+        </div>
+    </div>
+</div>
+
+<!-- 快捷问题 -->
+<div class="quick-questions">
+    <span class="quick-label">快捷提问:</span>
+    <button class="quick-btn" data-question="介绍一下学校的校史">🏫 学校校史</button>
+    <button class="quick-btn" data-question="如何高效学习Python编程？">🐍 学习Python</button>
+    <button class="quick-btn" data-question="写一篇关于人工智能的短文">🤖 AI短文</button>
+    <button class="quick-btn" data-question="帮我规划考研复习计划">📚 考研规划</button>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const chatMessages = document.getElementById('chatMessages');
+const questionInput = document.getElementById('questionInput');
+const sendBtn = document.getElementById('sendBtn');
+const charCount = document.getElementById('charCount');
+const statusText = document.getElementById('statusText');
+function getCSRFToken() {
+    const name = 'csrftoken';
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.startsWith(name + '=')) {
+                return decodeURIComponent(cookie.substring(name.length + 1));
+            }
+        }
+    }
+    return '';
+}
+const csrfToken = getCSRFToken();
+
+// 自动调整文本框高度
+questionInput.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 150) + 'px';
+    charCount.textContent = `${this.value.length} / 2000`;
+    sendBtn.disabled = this.value.trim().length === 0;
+});
+
+// 发送消息
+async function sendMessage(question) {
+    if (!question.trim()) return;
+
+    // 添加用户消息
+    addMessage(question, 'user');
+    questionInput.value = '';
+    questionInput.style.height = 'auto';
+    charCount.textContent = '0 / 2000';
+    sendBtn.disabled = true;
+
+    // 添加加载消息
+    const loadingId = addLoadingMessage();
+
+    try {
+        const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify({ question: question })
+        });
+
+        // 检查HTTP状态
+        if (!response.ok) {
+            let errMsg = '请求失败 (HTTP ' + response.status + ')';
+            try {
+                const errData = await response.json();
+                if (errData && errData.message) errMsg = errData.message;
+            } catch(e) {}
+            removeLoadingMessage(loadingId);
+            addMessage(errMsg, 'ai error');
+            statusText.textContent = '出错了';
+            return;
+        }
+
+        const result = await response.json();
+
+        // 移除加载消息
+        removeLoadingMessage(loadingId);
+
+        if (result.success) {
+            const answer = result.data.answer || '(空回答)';
+            addMessage(answer, 'ai');
+            statusText.textContent = '已回复';
+        } else {
+            addMessage(result.message || '请求失败，请重试', 'ai error');
+            statusText.textContent = '出错了';
+        }
+    } catch (error) {
+        removeLoadingMessage(loadingId);
+        const errMsg = error.message || '网络错误，请检查连接后重试';
+        addMessage(errMsg, 'ai error');
+        statusText.textContent = '连接失败';
+        console.error('Chat API Error:', error);
+    }
+}
+
+// 添加消息
+function addMessage(content, type) {
+    const div = document.createElement('div');
+    div.className = `message ${type}-message`;
+
+    const avatar = type === 'user' ? 'avatar-user' : 'avatar-ai';
+    const icon = type === 'user' ? 'fa-user' : 'fa-robot';
+    const bubbleClass = type === 'user' ? 'user-bubble' : 'ai-bubble';
+
+    div.innerHTML = `
+        <div class="message-avatar ${avatar}">
+            <i class="fas ${icon}"></i>
+        </div>
+        <div class="message-content">
+            <div class="message-bubble ${bubbleClass}">
+                <p>${content.replace(/\n/g, '<br>')}</p>
+            </div>
+            <span class="message-time">${new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'})}</span>
+        </div>
+    `;
+
+    chatMessages.appendChild(div);
+    scrollToBottom();
+    return div;
+}
+
+// 添加加载消息
+function addLoadingMessage() {
+    const id = 'loading-' + Date.now();
+    const div = document.createElement('div');
+    div.className = 'message ai-message';
+    div.id = id;
+
+    div.innerHTML = `
+        <div class="message-avatar avatar-ai">
+            <i class="fas fa-robot"></i>
+        </div>
+        <div class="message-content">
+            <div class="message-bubble ai-bubble loading-bubble">
+                <div class="typing-indicator">
+                    <span></span><span></span><span></span>
+                </div>
+                <p class="loading-text">AI 思考中...</p>
+            </div>
+        </div>
+    `;
+
+    chatMessages.appendChild(div);
+    scrollToBottom();
+    statusText.textContent = 'AI思考中...';
+    return id;
+}
+
+// 移除加载消息
+function removeLoadingMessage(id) {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+}
+
+// 滚动到底部
+function scrollToBottom() {
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// 发送按钮点击
+sendBtn.addEventListener('click', () => {
+    const question = questionInput.value.trim();
+    if (question) sendMessage(question);
+});
+
+// Enter发送（Shift+Enter换行）
+questionInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const question = questionInput.value.trim();
+        if (question) sendMessage(question);
+    }
+});
+
+// 快捷提问
+document.querySelectorAll('.quick-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        sendMessage(btn.dataset.question);
+    });
+});
+</script>
+{% endblock %}
